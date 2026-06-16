@@ -148,4 +148,27 @@ describe("image processing", () => {
     expect(result.stats.changedPixelCount).toBeGreaterThan(0);
     expect(result.imageData.data[3]).toBe(255);
   });
+
+  it("repaints small dirty palette islands with the surrounding label", () => {
+    const pixels: number[] = [];
+    for (let index = 0; index < 25; index += 1) {
+      const isCenter = index === 12;
+      pixels.push(...(isCenter ? [30, 180, 30, 255] : [220, 40, 35, 255]));
+    }
+
+    const result = stabilizeLabPalette(
+      new ImageData(new Uint8ClampedArray(pixels), 5, 5),
+      {
+        strength: 100,
+        paletteSize: 2,
+        lumaStrength: 30,
+        chromaStrength: 90,
+        edgeProtect: 100,
+      },
+    );
+
+    const centerOffset = 12 * 4;
+    expect(result.imageData.data[centerOffset]).toBeGreaterThan(150);
+    expect(result.imageData.data[centerOffset + 1]).toBeLessThan(100);
+  });
 });

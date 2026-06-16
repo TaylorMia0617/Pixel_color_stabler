@@ -16,6 +16,8 @@ class StabilizeConfig:
     reference: Literal["none", "first"] = "none"
     palette_ema: float = 0.35
     max_iter: int = 40
+    dirty_clean: bool = True
+    island_area: int = 260
 
     def normalized(self) -> "StabilizeConfig":
         stabilize = self.stabilize if self.stabilize in {"none", "ema"} else "none"
@@ -32,6 +34,8 @@ class StabilizeConfig:
             reference=self.reference if self.reference in {"none", "first"} else "none",
             palette_ema=_clamp01(self.palette_ema),
             max_iter=max(1, int(self.max_iter)),
+            dirty_clean=bool(self.dirty_clean),
+            island_area=max(1, int(self.island_area)),
         )
 
 

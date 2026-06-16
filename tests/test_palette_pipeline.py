@@ -58,6 +58,29 @@ def test_masked_out_area_is_unchanged():
     assert np.array_equal(out_arr[2:, 2:, :], rgba[2:, 2:, :])
 
 
+def test_dirty_color_island_is_repainted_from_surrounding_color():
+    rgba = np.zeros((5, 5, 4), dtype=np.uint8)
+    rgba[..., :3] = [220, 40, 35]
+    rgba[..., 3] = 255
+    rgba[2, 2, :3] = [30, 180, 30]
+
+    image = Image.fromarray(rgba, mode="RGBA")
+    out = stabilize_image(
+        image,
+        StabilizeConfig(
+            k=2,
+            strength=1,
+            luma_strength=0.3,
+            chroma_strength=0.9,
+            edge_protect=1,
+        ),
+    )
+    out_arr = np.array(out)
+
+    assert out_arr[2, 2, 0] > 150
+    assert out_arr[2, 2, 1] < 100
+
+
 def test_palette_matching_reorders_to_reference():
     current = np.array([[100, 10, 10], [20, 5, 5]], dtype=np.float32)
     reference = np.array([[20, 5, 5], [100, 10, 10]], dtype=np.float32)

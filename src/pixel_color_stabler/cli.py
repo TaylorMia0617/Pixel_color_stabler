@@ -39,6 +39,12 @@ def main(argv: list[str] | None = None) -> int:
         default="chroma",
         help="Optional chroma smoothing before palette fitting.",
     )
+    parser.add_argument(
+        "--no-dirty-clean",
+        action="store_true",
+        help="Disable connected-component dirty color island cleanup.",
+    )
+    parser.add_argument("--island-area", type=int, default=260, help="Base dirty island area threshold.")
     args = parser.parse_args(argv)
 
     cfg = StabilizeConfig(
@@ -53,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         stabilize=args.stabilize,
         reference=args.reference,
         palette_ema=args.palette_ema,
+        dirty_clean=not args.no_dirty_clean,
+        island_area=args.island_area,
     )
 
     input_path = Path(args.input)
