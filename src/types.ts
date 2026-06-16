@@ -12,8 +12,41 @@ export type ImageDocument = {
 };
 
 export type ProcessingSettings = {
-  tolerance: number;
   strength: number;
+  paletteSize: number;
+  lumaStrength: number;
+  chromaStrength: number;
+  edgeProtect: number;
+};
+
+export type AppConfig = {
+  settings: ProcessingSettings;
+  defaultExportFolder: string | null;
+  basketFolder: string | null;
+  basketAutoScan: boolean;
+};
+
+export type ImageFileEntry = {
+  path: string;
+  name: string;
+  sourceDir: string;
+  size: number;
+};
+
+export type BatchStatus = "queued" | "processing" | "exported" | "failed" | "skipped";
+
+export type BatchJob = {
+  id: string;
+  path?: string;
+  name: string;
+  sourceDir?: string;
+  file?: File;
+  status: BatchStatus;
+  progress: number;
+  outputPath?: string;
+  error?: string;
+  dimensions?: string;
+  changedPercent?: number;
 };
 
 export type ProcessedImage = {

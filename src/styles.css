@@ -122,6 +122,31 @@ button {
   min-height: 0;
 }
 
+.mode-tabs {
+  display: inline-flex;
+  gap: 4px;
+  max-width: 1440px;
+  margin: 0 auto 14px;
+  padding: 4px;
+  background: var(--accent-soft);
+  border-radius: 8px;
+}
+
+.mode-tabs button {
+  min-width: 84px;
+  height: 34px;
+  padding: 0 12px;
+  color: var(--accent-strong);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.mode-tabs button.active {
+  color: white;
+  background: var(--accent);
+}
+
 .controls {
   align-self: start;
   background: var(--panel);
@@ -210,6 +235,48 @@ button {
   font-size: 12px;
 }
 
+.settings-actions,
+.basket-panel {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.utility-button {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.utility-button:hover {
+  background: #d2e8e2;
+}
+
+.path-hint {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .primary-button,
 .export-button,
 .zoom-button {
@@ -269,6 +336,117 @@ button:disabled,
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   overflow: hidden;
+}
+
+.batch-workspace {
+  height: calc(100vh - 104px);
+  min-height: 420px;
+  overflow: hidden;
+}
+
+.batch-panel {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.batch-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.batch-summary {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.job-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.empty-jobs,
+.job-row {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.empty-jobs {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: var(--muted);
+}
+
+.job-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px 36px;
+  gap: 8px 12px;
+  padding: 12px;
+}
+
+.job-row strong,
+.job-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-row span,
+.job-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.job-status {
+  justify-self: end;
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.job-status.failed {
+  color: var(--warn);
+}
+
+.job-delete {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  color: var(--muted);
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.job-delete:hover {
+  color: var(--warn);
+  background: #fff0ed;
+}
+
+.job-progress {
+  grid-column: 1 / -1;
+  height: 6px;
+  overflow: hidden;
+  background: #dcebe6;
+  border-radius: 999px;
+}
+
+.job-progress div {
+  height: 100%;
+  background: var(--accent);
 }
 
 .drop-zone {
@@ -350,6 +528,12 @@ button:disabled,
   border: 1px solid #f0b4a8;
   border-radius: 8px;
   box-shadow: 0 12px 30px rgba(55, 49, 38, 0.12);
+}
+
+.toast.success {
+  background: #f0faf6;
+  color: var(--accent-strong);
+  border-color: #b9ded3;
 }
 
 @media (max-width: 900px) {

@@ -1,8 +1,7 @@
+import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
 
 export async function saveBlobAsPng(blob: Blob, suggestedName: string): Promise<void> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
   const path = await save({
     defaultPath: suggestedName,
     filters: [{ name: "PNG image", extensions: ["png"] }],
@@ -12,7 +11,8 @@ export async function saveBlobAsPng(blob: Blob, suggestedName: string): Promise<
     return;
   }
 
-  await writeFile(path, bytes);
+  const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+  await invoke("save_png_file", { path, bytes });
 }
 
 export function downloadBlobAsPng(blob: Blob, suggestedName: string): void {

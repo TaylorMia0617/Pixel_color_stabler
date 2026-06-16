@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clusterSimilarColors, rgbDistance, stabilizeLocalColors } from "./imageProcessing";
+import { labToRgb, rgbToLab, stabilizeLabPalette } from "./labPalette";
 
 class TestImageData {
   data: Uint8ClampedArray;
@@ -111,5 +112,40 @@ describe("image processing", () => {
 
     expect(result.imageData.data[16]).toBeLessThan(110);
     expect(result.imageData.data[20]).toBe(250);
+  });
+
+  it("round-trips RGB through Lab with small channel drift", () => {
+    const source = { r: 40, g: 120, b: 200 };
+    const next = labToRgb(rgbToLab(source.r, source.g, source.b));
+
+    expect(Math.abs(next.r - source.r)).toBeLessThanOrEqual(1);
+    expect(Math.abs(next.g - source.g)).toBeLessThanOrEqual(1);
+    expect(Math.abs(next.b - source.b)).toBeLessThanOrEqual(1);
+  });
+
+  it("uses Lab palette compression as the main denoise path", () => {
+    const result = stabilizeLabPalette(
+      new ImageData(
+        new Uint8ClampedArray([
+          40, 120, 200, 255,
+          42, 122, 202, 255,
+          220, 80, 30, 255,
+          221, 82, 29, 255,
+        ]),
+        2,
+        2,
+      ),
+      {
+        strength: 100,
+        paletteSize: 2,
+        lumaStrength: 30,
+        chromaStrength: 90,
+        edgeProtect: 0,
+      },
+    );
+
+    expect(result.stats.clusterCount).toBe(2);
+    expect(result.stats.changedPixelCount).toBeGreaterThan(0);
+    expect(result.imageData.data[3]).toBe(255);
   });
 });

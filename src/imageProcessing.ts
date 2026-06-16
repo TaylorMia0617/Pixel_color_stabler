@@ -5,6 +5,7 @@ import type {
   ProcessingSettings,
   RgbColor,
 } from "./types";
+import { stabilizeLabPalette, stabilizeLabPaletteAsync } from "./labPalette";
 
 type Cluster = {
   r: number;
@@ -26,6 +27,19 @@ export function rgbDistance(a: RgbColor, b: RgbColor): number {
 
 export async function loadImageToDocument(file: File): Promise<ImageDocument> {
   const bitmap = await createImageBitmap(file);
+  return bitmapToDocument(bitmap, file.name);
+}
+
+export async function loadImageBytesToDocument(
+  bytes: number[] | Uint8Array,
+  name: string,
+): Promise<ImageDocument> {
+  const blob = new Blob([new Uint8Array(bytes)]);
+  const bitmap = await createImageBitmap(blob);
+  return bitmapToDocument(bitmap, name);
+}
+
+async function bitmapToDocument(bitmap: ImageBitmap, name: string): Promise<ImageDocument> {
   const canvas = document.createElement("canvas");
   canvas.width = bitmap.width;
   canvas.height = bitmap.height;
@@ -40,7 +54,7 @@ export async function loadImageToDocument(file: File): Promise<ImageDocument> {
   bitmap.close();
 
   return {
-    name: file.name,
+    name,
     width: original.width,
     height: original.height,
     original,
@@ -51,7 +65,7 @@ export function stabilizeImage(
   document: ImageDocument,
   settings: ProcessingSettings,
 ): ColorClusterResult {
-  return stabilizeLocalColors(document.original, settings.tolerance, settings.strength);
+  return stabilizeLabPalette(document.original, settings);
 }
 
 export async function stabilizeImageAsync(
@@ -60,13 +74,7 @@ export async function stabilizeImageAsync(
   onProgress?: (progress: ProcessingProgress) => void,
   signal?: AbortSignal,
 ): Promise<ColorClusterResult> {
-  return stabilizeLocalColorsAsync(
-    document.original,
-    settings.tolerance,
-    settings.strength,
-    onProgress,
-    signal,
-  );
+  return stabilizeLabPaletteAsync(document.original, settings, onProgress, signal);
 }
 
 export function stabilizeLocalColors(

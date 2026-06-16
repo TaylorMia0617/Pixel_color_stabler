@@ -1,34 +1,113 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, ImagePlus, RotateCcw, SlidersHorizontal, Sparkles, ZoomIn } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Download,
+  FolderInput,
+  ImagePlus,
+  RotateCcw,
+  Save,
+  SlidersHorizontal,
+  Sparkles,
+  Trash2,
+  ZoomIn,
+} from "lucide-react";
 import { CanvasPreview } from "./CanvasPreview";
-import { exportPng, loadImageToDocument, stabilizeImageAsync } from "./imageProcessing";
+import {
+  exportPng,
+  loadImageBytesToDocument,
+  loadImageToDocument,
+  stabilizeImageAsync,
+} from "./imageProcessing";
 import { t } from "./i18n";
 import { downloadBlobAsPng, isTauriRuntime, saveBlobAsPng } from "./tauriExport";
-import type { ImageDocument, ProcessedImage, ProcessingProgress, ProcessingSettings } from "./types";
+import { DEFAULT_APP_CONFIG, DEFAULT_SETTINGS, normalizeAppConfig } from "./appConfig";
+import { collectBasketEntries, entriesToBatchJobs, filesToBatchJobs, removeBatchJob } from "./batch";
+import { runCancellableBatchQueue } from "./batchRuntime";
+import {
+  abortActiveTaskControllers,
+  isAbortError,
+  throwIfSignalAborted,
+} from "./taskCleanup";
+import {
+  loadConfig,
+  pickFolder,
+  pickImageFiles,
+  readImageFile,
+  saveConfig,
+  savePngToDirectory,
+  scanImageFolder,
+} from "./tauriBackend";
+import type {
+  AppConfig,
+  BatchJob,
+  BatchStatus,
+  ImageDocument,
+  ProcessedImage,
+  ProcessingProgress,
+  ProcessingSettings,
+} from "./types";
 
-const DEFAULT_SETTINGS: ProcessingSettings = {
-  tolerance: 28,
-  strength: 100,
+const batchStatusLabels: Record<BatchStatus, Parameters<typeof t>[0]> = {
+  queued: "queued",
+  processing: "jobProcessing",
+  exported: "exported",
+  failed: "failed",
+  skipped: "skipped",
 };
 
 export function App() {
   const [document, setDocument] = useState<ImageDocument | null>(null);
   const [processed, setProcessed] = useState<ProcessedImage | null>(null);
   const [settings, setSettings] = useState<ProcessingSettings>(DEFAULT_SETTINGS);
+  const [appConfig, setAppConfig] = useState<AppConfig>(DEFAULT_APP_CONFIG);
+  const [mode, setMode] = useState<"single" | "batch">("single");
+  const [batchJobs, setBatchJobs] = useState<BatchJob[]>([]);
+  const [isBatchRunning, setIsBatchRunning] = useState(false);
+  const [basketSeen, setBasketSeen] = useState<Set<string>>(new Set());
+  const basketCandidates = useRef<Map<string, number>>(new Map());
+  const processingControllerRef = useRef<AbortController | null>(null);
+  const batchControllerRef = useRef<AbortController | null>(null);
+  const isClosingRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<ProcessingProgress | null>(null);
   const [processRunId, setProcessRunId] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const suggestedExportName = useMemo(() => {
     if (!document) {
       return t("stabilizedFileName");
     }
 
-    return `${document.name.replace(/\.[^.]+$/, "")}-降噪.png`;
+    return `${document.name.replace(/\.[^.]+$/, "")}-${t("stabilizedFileSuffix")}.png`;
   }, [document]);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+
+    loadConfig()
+      .then((config) => {
+        const normalized = normalizeAppConfig(config);
+        setAppConfig(normalized);
+        setSettings(normalized.settings);
+      })
+      .catch(() => setAppConfig(DEFAULT_APP_CONFIG));
+  }, []);
+
+  useEffect(() => {
+    isClosingRef.current = false;
+
+    const cancelActiveTasks = () => {
+      abortActiveTaskControllers([processingControllerRef, batchControllerRef]);
+    };
+    return () => {
+      isClosingRef.current = true;
+      cancelActiveTasks();
+    };
+  }, []);
 
   useEffect(() => {
     if (!document) {
@@ -38,6 +117,8 @@ export function App() {
     }
 
     const controller = new AbortController();
+    processingControllerRef.current?.abort();
+    processingControllerRef.current = controller;
     setIsProcessing(true);
     setProcessed(null);
     setProgress({ phase: "clustering", percent: 0 });
@@ -53,19 +134,27 @@ export function App() {
         setProgress({ phase: "rendering", percent: 100 });
       })
       .catch((nextError) => {
-        if (nextError instanceof DOMException && nextError.name === "AbortError") {
+        if (isAbortError(nextError)) {
           return;
         }
 
         setError(t("processingFailed"));
       })
       .finally(() => {
+        if (processingControllerRef.current === controller) {
+          processingControllerRef.current = null;
+        }
         if (!controller.signal.aborted) {
           setIsProcessing(false);
         }
       });
 
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (processingControllerRef.current === controller) {
+        processingControllerRef.current = null;
+      }
+    };
   }, [document, settings, processRunId]);
 
   const importFile = useCallback(async (file: File) => {
@@ -76,11 +165,11 @@ export function App() {
 
     setIsLoading(true);
     setError(null);
+    setNotice(null);
 
     try {
       const nextDocument = await loadImageToDocument(file);
       setDocument(nextDocument);
-      setSettings(DEFAULT_SETTINGS);
     } catch (nextError) {
       setError(t("loadImageFailed"));
     } finally {
@@ -102,12 +191,18 @@ export function App() {
   const handleDrop = useCallback(
     (event: React.DragEvent<HTMLLabelElement>) => {
       event.preventDefault();
-      const file = event.dataTransfer.files[0];
+      const files = Array.from(event.dataTransfer.files);
+      if (mode === "batch" && files.length > 1) {
+        setBatchJobs((current) => [...current, ...filesToBatchJobs(files, current)]);
+        return;
+      }
+
+      const file = files[0];
       if (file) {
         void importFile(file);
       }
     },
-    [importFile],
+    [importFile, mode],
   );
 
   const exportProcessedImage = useCallback(async () => {
@@ -116,6 +211,7 @@ export function App() {
     }
 
     setError(null);
+    setNotice(null);
 
     try {
       const blob = await exportPng(processed.imageData);
@@ -125,9 +221,219 @@ export function App() {
         downloadBlobAsPng(blob, suggestedExportName);
       }
     } catch (nextError) {
-      setError(t("exportFailed"));
+      const detail = nextError instanceof Error ? nextError.message : String(nextError);
+      setError(`${t("exportFailed")} ${detail}`);
     }
   }, [processed, suggestedExportName]);
+
+  const saveDefaults = useCallback(async () => {
+    const nextConfig = { ...appConfig, settings };
+    setAppConfig(nextConfig);
+    setError(null);
+    setNotice(null);
+
+    try {
+      if (isTauriRuntime()) {
+        await saveConfig(nextConfig);
+      }
+      setNotice(t("defaultsSaved"));
+    } catch (nextError) {
+      const detail = nextError instanceof Error ? nextError.message : String(nextError);
+      setError(`${t("defaultsSaveFailed")} ${detail}`);
+    }
+  }, [appConfig, settings]);
+
+  const restoreDefaults = useCallback(() => {
+    setSettings(appConfig.settings);
+    setNotice(t("defaultsRestored"));
+  }, [appConfig.settings]);
+
+  const chooseDefaultExportFolder = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    const folder = await pickFolder();
+    if (!folder) {
+      return;
+    }
+    const nextConfig = { ...appConfig, defaultExportFolder: folder };
+    setAppConfig(nextConfig);
+    await saveConfig(nextConfig);
+  }, [appConfig]);
+
+  const chooseBasketFolder = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    const folder = await pickFolder();
+    if (!folder) {
+      return;
+    }
+    const nextConfig = { ...appConfig, basketFolder: folder };
+    setAppConfig(nextConfig);
+    setBasketSeen(new Set());
+    basketCandidates.current.clear();
+    await saveConfig(nextConfig);
+  }, [appConfig]);
+
+  const toggleBasketAutoScan = useCallback(async () => {
+    const nextConfig = { ...appConfig, basketAutoScan: !appConfig.basketAutoScan };
+    setAppConfig(nextConfig);
+    if (isTauriRuntime()) {
+      await saveConfig(nextConfig);
+    }
+  }, [appConfig]);
+
+  const addFilesToBatch = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    const entries = await pickImageFiles();
+    setBatchJobs((current) => [...current, ...entriesToBatchJobs(entries, current)]);
+  }, []);
+
+  const addFolderToBatch = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      return;
+    }
+    const folder = await pickFolder();
+    if (!folder) {
+      return;
+    }
+    const entries = await scanImageFolder(folder);
+    setBatchJobs((current) => [...current, ...entriesToBatchJobs(entries, current)]);
+  }, []);
+
+  const scanBasket = useCallback(async (requireStableSize = false) => {
+    if (isClosingRef.current || !isTauriRuntime() || !appConfig.basketFolder) {
+      return;
+    }
+    const entries = await scanImageFolder(appConfig.basketFolder);
+    const stableEntries = collectBasketEntries(
+      entries,
+      basketSeen,
+      basketCandidates.current,
+      requireStableSize,
+    );
+    if (!stableEntries.length) {
+      return;
+    }
+
+    setBasketSeen((current) => {
+      const next = new Set(current);
+      for (const entry of stableEntries) {
+        next.add(entry.path);
+      }
+      return next;
+    });
+    setBatchJobs((current) => [...current, ...entriesToBatchJobs(stableEntries, current)]);
+  }, [appConfig.basketFolder, basketSeen]);
+
+  useEffect(() => {
+    if (!appConfig.basketAutoScan || !appConfig.basketFolder) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void scanBasket(true);
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [appConfig.basketAutoScan, appConfig.basketFolder, scanBasket]);
+
+  const deleteBatchJob = useCallback((id: string) => {
+    setBatchJobs((current) => removeBatchJob(current, id));
+  }, []);
+
+  const runBatch = useCallback(async () => {
+    if (isBatchRunning) {
+      return;
+    }
+
+    batchControllerRef.current?.abort();
+    const controller = new AbortController();
+    batchControllerRef.current = controller;
+    setIsBatchRunning(true);
+
+    await runCancellableBatchQueue(batchJobs, controller.signal, {
+      processJob: async (job, signal) => {
+        setBatchJobs((current) =>
+          current.map((item) =>
+            item.id === job.id ? { ...item, status: "processing", progress: 5, error: undefined } : item,
+          ),
+        );
+
+        const documentForJob = job.file
+          ? await loadImageToDocument(job.file)
+          : await loadImageBytesToDocument(await readImageFile(job.path!), job.name);
+        throwIfSignalAborted(signal);
+
+        const result = await stabilizeImageAsync(documentForJob, settings, (nextProgress) => {
+          setBatchJobs((current) =>
+            current.map((item) =>
+              item.id === job.id ? { ...item, progress: nextProgress.percent } : item,
+            ),
+          );
+        }, signal);
+        throwIfSignalAborted(signal);
+
+        const blob = await exportPng(result.imageData);
+        throwIfSignalAborted(signal);
+
+        const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+        let outputPath = "";
+        if (isTauriRuntime() && job.path) {
+          outputPath = await savePngToDirectory({
+                outputDir: appConfig.defaultExportFolder,
+                sourcePath: job.path,
+                sourceName: job.name,
+                suffix: t("stabilizedFileSuffix"),
+                bytes,
+              });
+        } else {
+          downloadBlobAsPng(blob, `${job.name.replace(/\.[^.]+$/, "")}-${t("stabilizedFileSuffix")}.png`);
+          outputPath = t("browserDownload");
+        }
+        const changedPercent = Math.round(
+          (result.stats.changedPixelCount / result.stats.totalPixelCount) * 100,
+        );
+
+        setBatchJobs((current) =>
+          current.map((item) =>
+            item.id === job.id
+              ? {
+                  ...item,
+                  status: "exported",
+                  progress: 100,
+                  outputPath: outputPath || t("browserDownload"),
+                  dimensions: `${documentForJob.width} x ${documentForJob.height}`,
+                  changedPercent,
+                }
+              : item,
+          ),
+        );
+      },
+      onJobAbort: (job) => {
+        setBatchJobs((current) =>
+          current.map((item) =>
+            item.id === job.id ? { ...item, status: "skipped", progress: 0 } : item,
+          ),
+        );
+      },
+      onJobFailure: (job, nextError) => {
+        const detail = nextError instanceof Error ? nextError.message : String(nextError);
+        setBatchJobs((current) =>
+          current.map((item) =>
+            item.id === job.id ? { ...item, status: "failed", error: detail, progress: 0 } : item,
+          ),
+        );
+      },
+    });
+
+    if (batchControllerRef.current === controller) {
+      batchControllerRef.current = null;
+    }
+    setIsBatchRunning(false);
+  }, [appConfig.defaultExportFolder, batchJobs, isBatchRunning, settings]);
 
   const changedPercent = processed
     ? Math.round((processed.stats.changedPixelCount / processed.stats.totalPixelCount) * 100)
@@ -155,6 +461,23 @@ export function App() {
         </label>
       </header>
 
+      <div className="mode-tabs" role="tablist" aria-label={t("modeTabs")}>
+        <button
+          type="button"
+          className={mode === "single" ? "active" : ""}
+          onClick={() => setMode("single")}
+        >
+          {t("singleMode")}
+        </button>
+        <button
+          type="button"
+          className={mode === "batch" ? "active" : ""}
+          onClick={() => setMode("batch")}
+        >
+          {t("batchMode")}
+        </button>
+      </div>
+
       <section className="workspace">
         <aside className="controls" aria-label={t("controls")}>
           <div className="control-title">
@@ -164,21 +487,21 @@ export function App() {
 
           <label className="slider-row">
             <span>
-              {t("tolerance")}
-              <strong>{settings.tolerance}</strong>
+              {t("paletteSize")}
+              <strong>{settings.paletteSize}</strong>
             </span>
             <input
               type="range"
-              min="0"
-              max="80"
-              value={settings.tolerance}
+              min="1"
+              max="16"
+              value={settings.paletteSize}
               onChange={(event) =>
                 setSettings((current) => ({
                   ...current,
-                  tolerance: Number(event.target.value),
+                  paletteSize: Number(event.target.value),
                 }))
               }
-              disabled={!document || isProcessing}
+              disabled={isBatchRunning}
             />
           </label>
 
@@ -198,7 +521,67 @@ export function App() {
                   strength: Number(event.target.value),
                 }))
               }
-              disabled={!document || isProcessing}
+              disabled={isBatchRunning}
+            />
+          </label>
+
+          <label className="slider-row">
+            <span>
+              {t("lumaStrength")}
+              <strong>{settings.lumaStrength}%</strong>
+            </span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={settings.lumaStrength}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  lumaStrength: Number(event.target.value),
+                }))
+              }
+              disabled={isBatchRunning}
+            />
+          </label>
+
+          <label className="slider-row">
+            <span>
+              {t("chromaStrength")}
+              <strong>{settings.chromaStrength}%</strong>
+            </span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={settings.chromaStrength}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  chromaStrength: Number(event.target.value),
+                }))
+              }
+              disabled={isBatchRunning}
+            />
+          </label>
+
+          <label className="slider-row">
+            <span>
+              {t("edgeProtect")}
+              <strong>{settings.edgeProtect}%</strong>
+            </span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={settings.edgeProtect}
+              onChange={(event) =>
+                setSettings((current) => ({
+                  ...current,
+                  edgeProtect: Number(event.target.value),
+                }))
+              }
+              disabled={isBatchRunning}
             />
           </label>
 
@@ -241,7 +624,7 @@ export function App() {
                 setSettings(DEFAULT_SETTINGS);
                 setZoom(1);
               }}
-              disabled={!document || isProcessing}
+              disabled={isBatchRunning}
               title={t("resetControls")}
             >
               <RotateCcw size={17} aria-hidden="true" />
@@ -256,6 +639,51 @@ export function App() {
               {t("reprocess")}
             </button>
           </div>
+
+          <div className="settings-actions">
+            <button type="button" className="utility-button" onClick={() => void saveDefaults()}>
+              <Save size={16} aria-hidden="true" />
+              {t("saveDefaults")}
+            </button>
+            <button type="button" className="utility-button" onClick={restoreDefaults}>
+              <RotateCcw size={16} aria-hidden="true" />
+              {t("restoreDefaults")}
+            </button>
+            <button
+              type="button"
+              className="utility-button"
+              onClick={() => void chooseDefaultExportFolder()}
+            >
+              <FolderInput size={16} aria-hidden="true" />
+              {t("defaultExportFolder")}
+            </button>
+            <div className="path-hint">{appConfig.defaultExportFolder || t("sourceOutFallback")}</div>
+          </div>
+
+          {mode === "batch" && (
+            <div className="basket-panel">
+              <button
+                type="button"
+                className="utility-button"
+                onClick={() => void chooseBasketFolder()}
+              >
+                <FolderInput size={16} aria-hidden="true" />
+                {t("basketFolder")}
+              </button>
+              <div className="path-hint">{appConfig.basketFolder || t("notSet")}</div>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={appConfig.basketAutoScan}
+                  onChange={() => void toggleBasketAutoScan()}
+                />
+                {t("basketAutoScan")}
+              </label>
+              <button type="button" className="utility-button" onClick={() => void scanBasket(false)}>
+                {t("scanBasket")}
+              </button>
+            </div>
+          )}
 
           <button
             type="button"
@@ -284,7 +712,7 @@ export function App() {
                 <dd>{changedPercent}%</dd>
               </div>
               <div>
-                <dt>{t("clusters")}</dt>
+                <dt>{t("paletteColors")}</dt>
                 <dd>{processed.stats.clusterCount.toLocaleString()}</dd>
               </div>
               <div>
@@ -297,8 +725,8 @@ export function App() {
           )}
         </aside>
 
-        <section className="preview-grid">
-          {!document && (
+        <section className={mode === "single" ? "preview-grid" : "batch-workspace"}>
+          {mode === "single" && !document && (
             <label
               className="drop-zone"
               onDragOver={(event) => event.preventDefault()}
@@ -314,16 +742,79 @@ export function App() {
             </label>
           )}
 
-          {document && (
+          {mode === "single" && document && (
             <>
               <CanvasPreview imageData={document.original} label={t("original")} zoom={zoom} />
               <CanvasPreview imageData={processed?.imageData} label={t("stabilized")} zoom={zoom} />
             </>
           )}
+
+          {mode === "batch" && (
+            <section className="batch-panel" aria-label={t("batchMode")}>
+              <div className="batch-toolbar">
+                <button type="button" className="primary-button" onClick={() => void addFilesToBatch()}>
+                  {t("addFiles")}
+                </button>
+                <button type="button" className="utility-button" onClick={() => void addFolderToBatch()}>
+                  {t("addFolder")}
+                </button>
+                <button
+                  type="button"
+                  className="export-button"
+                  onClick={() => void runBatch()}
+                  disabled={isBatchRunning || !batchJobs.some((job) => job.status === "queued")}
+                >
+                  {isBatchRunning ? t("batchRunning") : t("startBatch")}
+                </button>
+              </div>
+              <div className="batch-summary">
+                {t("batchSummary")
+                  .replace("{total}", String(batchJobs.length))
+                  .replace(
+                    "{done}",
+                    String(batchJobs.filter((job) => job.status === "exported").length),
+                  )
+                  .replace(
+                    "{failed}",
+                    String(batchJobs.filter((job) => job.status === "failed").length),
+                  )}
+              </div>
+              <div className="job-list">
+                {batchJobs.length === 0 && <div className="empty-jobs">{t("emptyBatch")}</div>}
+                {batchJobs.map((job) => (
+                  <article className="job-row" key={job.id}>
+                    <div>
+                      <strong>{job.name}</strong>
+                      <span>{job.outputPath || job.error || job.path || t("queued")}</span>
+                    </div>
+                    <div className={`job-status ${job.status}`}>{t(batchStatusLabels[job.status])}</div>
+                    <button
+                      type="button"
+                      className="job-delete"
+                      onClick={() => deleteBatchJob(job.id)}
+                      disabled={job.status === "processing"}
+                      title={t("deleteJob")}
+                      aria-label={`${t("deleteJob")} ${job.name}`}
+                    >
+                      <Trash2 size={16} aria-hidden="true" />
+                    </button>
+                    <div className="job-progress">
+                      <div style={{ width: `${job.progress}%` }} />
+                    </div>
+                    <small>
+                      {job.dimensions || ""}
+                      {job.changedPercent !== undefined ? ` · ${t("changed")} ${job.changedPercent}%` : ""}
+                    </small>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
         </section>
       </section>
 
       {error && <div className="toast" role="alert">{error}</div>}
+      {notice && <div className="toast success" role="status">{notice}</div>}
     </main>
   );
 }
