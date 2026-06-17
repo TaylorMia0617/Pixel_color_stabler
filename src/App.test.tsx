@@ -8,7 +8,7 @@ describe("App settings controls", () => {
     render(<App />);
 
     const controls = [
-      screen.getByText("目标色板").closest("label")?.querySelector("input"),
+      screen.getByText("色板细节").closest("label")?.querySelector("input"),
       screen.getByText("处理强度").closest("label")?.querySelector("input"),
       screen.getByText("亮度强度").closest("label")?.querySelector("input"),
       screen.getByText("色度强度").closest("label")?.querySelector("input"),

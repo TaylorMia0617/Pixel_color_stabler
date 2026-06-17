@@ -12,11 +12,33 @@ export type ImageDocument = {
 };
 
 export type ProcessingSettings = {
+  processingMode: "palette" | "dirtyOnly" | "dirtyThenPalette";
   strength: number;
   paletteSize: number;
   lumaStrength: number;
   chromaStrength: number;
   edgeProtect: number;
+  cleanupMode: "shaded" | "flat";
+  dirtyClean: boolean;
+  speckArea: number;
+  labelArea: number;
+  familyArea: number;
+  labelFilterSize: 3 | 5;
+  dirtyBlock: DirtyBlockSettings;
+};
+
+export type DirtyBlockSettings = {
+  enabled: boolean;
+  analysisPaletteSize: number;
+  maxDirtyArea: number;
+  minSpeckArea: number;
+  surroundRadius: number;
+  surroundDominance: number;
+  sameFamilyDeltaE: number;
+  edgeProtect: number;
+  detailProtect: number;
+  repairStrength: number;
+  connectivity: 4 | 8;
 };
 
 export type AppConfig = {

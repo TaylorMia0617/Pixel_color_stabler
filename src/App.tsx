@@ -54,6 +54,93 @@ const batchStatusLabels: Record<BatchStatus, Parameters<typeof t>[0]> = {
   skipped: "skipped",
 };
 
+const PROCESSING_PRESETS: Array<{
+  key: Parameters<typeof t>[0];
+  settings: ProcessingSettings;
+}> = [
+  {
+    key: "presetSoft",
+    settings: {
+      ...DEFAULT_SETTINGS,
+      strength: 72,
+      paletteSize: 8,
+      lumaStrength: 22,
+      chromaStrength: 82,
+      edgeProtect: 75,
+      familyArea: 180,
+      labelArea: 56,
+      speckArea: 20,
+      labelFilterSize: 3,
+      dirtyBlock: {
+        ...DEFAULT_SETTINGS.dirtyBlock,
+        repairStrength: 72,
+        maxDirtyArea: 620,
+        surroundDominance: 0.62,
+      },
+    },
+  },
+  {
+    key: "presetStandard",
+    settings: DEFAULT_SETTINGS,
+  },
+  {
+    key: "presetStrong",
+    settings: {
+      ...DEFAULT_SETTINGS,
+      strength: 88,
+      paletteSize: 10,
+      lumaStrength: 20,
+      chromaStrength: 93,
+      edgeProtect: 65,
+      familyArea: 320,
+      labelArea: 96,
+      speckArea: 28,
+      labelFilterSize: 5,
+      dirtyBlock: {
+        ...DEFAULT_SETTINGS.dirtyBlock,
+        maxDirtyArea: 1200,
+        surroundRadius: 4,
+        surroundDominance: 0.54,
+        repairStrength: 92,
+      },
+    },
+  },
+  {
+    key: "presetFlat",
+    settings: {
+      ...DEFAULT_SETTINGS,
+      cleanupMode: "flat",
+      strength: 100,
+      paletteSize: 6,
+      lumaStrength: 5,
+      chromaStrength: 100,
+      edgeProtect: 85,
+      familyArea: 260,
+      labelArea: 64,
+      speckArea: 16,
+      labelFilterSize: 5,
+      dirtyBlock: {
+        ...DEFAULT_SETTINGS.dirtyBlock,
+        repairStrength: 92,
+      },
+    },
+  },
+  {
+    key: "presetDirtyOnly",
+    settings: {
+      ...DEFAULT_SETTINGS,
+      processingMode: "dirtyOnly",
+      strength: 0,
+      lumaStrength: 0,
+      chromaStrength: 0,
+      dirtyBlock: {
+        ...DEFAULT_SETTINGS.dirtyBlock,
+        repairStrength: 85,
+      },
+    },
+  },
+];
+
 export function App() {
   const [document, setDocument] = useState<ImageDocument | null>(null);
   const [processed, setProcessed] = useState<ProcessedImage | null>(null);
@@ -483,6 +570,91 @@ export function App() {
           <div className="control-title">
             <SlidersHorizontal size={18} aria-hidden="true" />
             {t("controls")}
+          </div>
+
+          <div className="preset-grid" aria-label={t("presetStandard")}>
+            {PROCESSING_PRESETS.map((preset) => (
+              <button
+                type="button"
+                className="preset-button"
+                key={preset.key}
+                onClick={() => setSettings(preset.settings)}
+                disabled={isBatchRunning}
+              >
+                {t(preset.key)}
+              </button>
+            ))}
+          </div>
+
+          <div className="mode-choice" aria-label={t("processingMode")}>
+            <button
+              type="button"
+              className={settings.processingMode === "palette" ? "active" : ""}
+              onClick={() =>
+                setSettings((current) => ({
+                  ...current,
+                  processingMode: "palette",
+                }))
+              }
+              disabled={isBatchRunning}
+            >
+              {t("processingModePalette")}
+            </button>
+            <button
+              type="button"
+              className={settings.processingMode === "dirtyOnly" ? "active" : ""}
+              onClick={() =>
+                setSettings((current) => ({
+                  ...current,
+                  processingMode: "dirtyOnly",
+                }))
+              }
+              disabled={isBatchRunning}
+            >
+              {t("processingModeDirtyOnly")}
+            </button>
+            <button
+              type="button"
+              className={settings.processingMode === "dirtyThenPalette" ? "active" : ""}
+              onClick={() =>
+                setSettings((current) => ({
+                  ...current,
+                  processingMode: "dirtyThenPalette",
+                }))
+              }
+              disabled={isBatchRunning}
+            >
+              {t("processingModeDirtyThenPalette")}
+            </button>
+          </div>
+
+          <div className="segmented-control" aria-label={t("cleanupMode")}>
+            <button
+              type="button"
+              className={settings.cleanupMode === "shaded" ? "active" : ""}
+              onClick={() =>
+                setSettings((current) => ({
+                  ...current,
+                  cleanupMode: "shaded",
+                }))
+              }
+              disabled={isBatchRunning}
+            >
+              {t("cleanupModeShaded")}
+            </button>
+            <button
+              type="button"
+              className={settings.cleanupMode === "flat" ? "active" : ""}
+              onClick={() =>
+                setSettings((current) => ({
+                  ...current,
+                  cleanupMode: "flat",
+                }))
+              }
+              disabled={isBatchRunning}
+            >
+              {t("cleanupModeFlat")}
+            </button>
           </div>
 
           <label className="slider-row">

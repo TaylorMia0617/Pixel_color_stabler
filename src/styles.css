@@ -165,6 +165,69 @@ button {
   margin-bottom: 18px;
 }
 
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.preset-button {
+  min-height: 34px;
+  padding: 0 8px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.preset-button:hover {
+  background: #d2e8e2;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 18px;
+  padding: 4px;
+  background: var(--accent-soft);
+  border-radius: 8px;
+}
+
+.segmented-control button {
+  min-height: 32px;
+  color: var(--accent-strong);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.segmented-control button.active {
+  color: white;
+  background: var(--accent);
+}
+
+.mode-choice {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.mode-choice button {
+  min-height: 32px;
+  padding: 0 10px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.mode-choice button.active {
+  color: white;
+  background: var(--accent);
+}
+
 .slider-row {
   display: grid;
   gap: 10px;

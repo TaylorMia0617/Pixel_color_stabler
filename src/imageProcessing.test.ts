@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_SETTINGS } from "./appConfig";
 import { clusterSimilarColors, rgbDistance, stabilizeLocalColors } from "./imageProcessing";
 import { labToRgb, rgbToLab, stabilizeLabPalette } from "./labPalette";
 
@@ -136,6 +137,7 @@ describe("image processing", () => {
         2,
       ),
       {
+        ...DEFAULT_SETTINGS,
         strength: 100,
         paletteSize: 2,
         lumaStrength: 30,
@@ -159,6 +161,7 @@ describe("image processing", () => {
     const result = stabilizeLabPalette(
       new ImageData(new Uint8ClampedArray(pixels), 5, 5),
       {
+        ...DEFAULT_SETTINGS,
         strength: 100,
         paletteSize: 2,
         lumaStrength: 30,
@@ -170,5 +173,135 @@ describe("image processing", () => {
     const centerOffset = 12 * 4;
     expect(result.imageData.data[centerOffset]).toBeGreaterThan(150);
     expect(result.imageData.data[centerOffset + 1]).toBeLessThan(100);
+  });
+
+  it("keeps dirty cleanup aggressive when palette size is high", () => {
+    const pixels: number[] = [];
+    for (let index = 0; index < 49; index += 1) {
+      const isDirtyPatch = index === 24 || index === 25;
+      const shade = 35 + (index % 4) * 4;
+      pixels.push(...(isDirtyPatch ? [40, 175, 35, 255] : [215 + (index % 3) * 5, shade, 35, 255]));
+    }
+
+    const result = stabilizeLabPalette(
+      new ImageData(new Uint8ClampedArray(pixels), 7, 7),
+      {
+        ...DEFAULT_SETTINGS,
+        strength: 100,
+        paletteSize: 12,
+        lumaStrength: 70,
+        chromaStrength: 100,
+        edgeProtect: 80,
+      },
+    );
+
+    const centerOffset = 24 * 4;
+    expect(result.imageData.data[centerOffset]).toBeGreaterThan(150);
+    expect(result.imageData.data[centerOffset + 1]).toBeLessThan(110);
+  });
+
+  it("repaints red islands inside a green subject", () => {
+    const pixels: number[] = [];
+    for (let index = 0; index < 25; index += 1) {
+      const isCenter = index === 12;
+      pixels.push(...(isCenter ? [220, 45, 35, 255] : [35, 155, 45, 255]));
+    }
+
+    const result = stabilizeLabPalette(
+      new ImageData(new Uint8ClampedArray(pixels), 5, 5),
+      {
+        ...DEFAULT_SETTINGS,
+        strength: 100,
+        paletteSize: 2,
+        chromaStrength: 100,
+        edgeProtect: 100,
+      },
+    );
+
+    const centerOffset = 12 * 4;
+    expect(result.imageData.data[centerOffset]).toBeLessThan(100);
+    expect(result.imageData.data[centerOffset + 1]).toBeGreaterThan(100);
+  });
+
+  it("dirty-only mode repairs a green island without palette-compressing the whole image", () => {
+    const pixels: number[] = [];
+    for (let index = 0; index < 25; index += 1) {
+      const isCenter = index === 12;
+      const redShade = 210 + (index % 3) * 4;
+      pixels.push(...(isCenter ? [35, 180, 35, 255] : [redShade, 45, 38, 255]));
+    }
+
+    const result = stabilizeLabPalette(
+      new ImageData(new Uint8ClampedArray(pixels), 5, 5),
+      {
+        ...DEFAULT_SETTINGS,
+        processingMode: "dirtyOnly",
+        strength: 0,
+        paletteSize: 12,
+        dirtyBlock: {
+          ...DEFAULT_SETTINGS.dirtyBlock,
+          maxDirtyArea: 80,
+          repairStrength: 100,
+        },
+      },
+    );
+
+    const centerOffset = 12 * 4;
+    expect(result.imageData.data[centerOffset]).toBeGreaterThan(150);
+    expect(result.imageData.data[centerOffset + 1]).toBeLessThan(100);
+    expect(Math.abs(result.imageData.data[0] - pixels[0])).toBeLessThanOrEqual(6);
+  });
+
+  it("dirty-only mode repairs a red island inside a green subject", () => {
+    const pixels: number[] = [];
+    for (let index = 0; index < 25; index += 1) {
+      const isCenter = index === 12;
+      pixels.push(...(isCenter ? [225, 45, 35, 255] : [38, 155 + (index % 3) * 3, 45, 255]));
+    }
+
+    const result = stabilizeLabPalette(
+      new ImageData(new Uint8ClampedArray(pixels), 5, 5),
+      {
+        ...DEFAULT_SETTINGS,
+        processingMode: "dirtyOnly",
+        strength: 0,
+        paletteSize: 12,
+        dirtyBlock: {
+          ...DEFAULT_SETTINGS.dirtyBlock,
+          maxDirtyArea: 80,
+          repairStrength: 100,
+        },
+      },
+    );
+
+    const centerOffset = 12 * 4;
+    expect(result.imageData.data[centerOffset]).toBeLessThan(100);
+    expect(result.imageData.data[centerOffset + 1]).toBeGreaterThan(110);
+  });
+
+  it("uses flat mode to repaint active pixels directly to palette colors", () => {
+    const result = stabilizeLabPalette(
+      new ImageData(
+        new Uint8ClampedArray([
+          220, 50, 40, 255,
+          222, 52, 42, 255,
+          40, 150, 45, 255,
+          42, 152, 47, 255,
+        ]),
+        2,
+        2,
+      ),
+      {
+        ...DEFAULT_SETTINGS,
+        cleanupMode: "flat",
+        strength: 10,
+        paletteSize: 2,
+        lumaStrength: 0,
+        chromaStrength: 10,
+      },
+    );
+
+    expect(result.stats.clusterCount).toBe(2);
+    expect(result.imageData.data[0]).not.toBe(220);
   });
 });
